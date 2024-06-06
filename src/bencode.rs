@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug)]
 pub enum Bencoded {
     Bstr(String),
@@ -65,6 +67,16 @@ impl Bencoded {
             }
 
             _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Bencoded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bstr(str) => write!(f, "{}", str),
+            Self::Int(int) => write!(f, "{}", int),
+            _ => Ok(()),
         }
     }
 }

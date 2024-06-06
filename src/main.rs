@@ -11,9 +11,9 @@ fn main() {
 
     if command == "decode" {
         let encoded_value = &args[2];
-        let decoded = Bencoded::parse(encoded_value);
+        let decoded = Bencoded::parse(encoded_value).expect("cannot decode invalid input");
 
-        println!("{:?}", decoded);
+        println!("{}", decoded);
     } else {
         println!("unknown command: {}", args[1])
     }
