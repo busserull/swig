@@ -62,7 +62,7 @@ impl Bencoded {
                     Self::Bstr(String::from(
                         &encoded[split_index + 1..split_index + size + 1],
                     )),
-                    &encoded[split_index + size + 2..],
+                    &encoded[split_index + size + 1..],
                 ))
             }
 
