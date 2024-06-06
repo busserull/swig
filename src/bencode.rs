@@ -74,7 +74,7 @@ impl Bencoded {
 impl fmt::Display for Bencoded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Bstr(str) => write!(f, "{}", str),
+            Self::Bstr(str) => write!(f, "\"{}\"", str),
             Self::Int(int) => write!(f, "{}", int),
             _ => Ok(()),
         }
