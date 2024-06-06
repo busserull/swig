@@ -118,5 +118,5 @@ fn parse_bencoded_list(mut encoded: &str) -> Option<(Vec<Bencoded>, &str)> {
         encoded = rest;
     }
 
-    matches!(encoded.chars().next(), Some('e')).then_some((list, encoded))
+    matches!(encoded.chars().next(), Some('e')).then_some((list, &encoded[1..]))
 }
