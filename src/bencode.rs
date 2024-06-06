@@ -12,17 +12,34 @@ pub enum Bencoded {
 
 impl Bencoded {
     pub fn parse(encoded: &str) -> Option<Self> {
-        Bencoded::do_parse(encoded)
+        Bencoded::do_parse(encoded).map(|(value, _)| value)
     }
 
-    fn do_parse(encoded: &str) -> Option<Self> {
+    fn do_parse(encoded: &str) -> Option<(Self, &str)> {
         match encoded.chars().next() {
             Some('i') => {
                 let end = encoded.find('e')?;
-                encoded[1..end].parse::<i64>().ok().map(Self::Int)
+
+                encoded[1..end]
+                    .parse::<i64>()
+                    .ok()
+                    .map(|int| (Self::Int(int), &encoded[end + 1..]))
             }
 
-            Some('l') => None,
+            Some('l') => {
+                let mut list = Vec::new();
+
+                let mut encoded = &encoded[1..];
+
+                while encoded.len() > 0 && encoded.chars().next().unwrap() != 'e' {
+                    let (item, rest) = Bencoded::do_parse(encoded)?;
+                    list.push(item);
+                    encoded = rest;
+                }
+
+                matches!(encoded.chars().next(), Some('e'))
+                    .then(|| (Self::List(list), &encoded[..]))
+            }
 
             Some('d') => None,
 
@@ -35,9 +52,12 @@ impl Bencoded {
                     return None;
                 }
 
-                Some(Self::Bstr(String::from(
-                    &encoded[split_index + 1..split_index + size + 1],
-                )))
+                Some((
+                    Self::Bstr(String::from(
+                        &encoded[split_index + 1..split_index + size + 1],
+                    )),
+                    &encoded[split_index + size + 2..],
+                ))
             }
 
             _ => None,
