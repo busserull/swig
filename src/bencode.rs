@@ -75,6 +75,7 @@ impl fmt::Display for Bencoded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Bstr(str) => write!(f, "\"{}\"", str),
+
             Self::Int(int) => write!(f, "{}", int),
 
             Self::List(list) => {
@@ -91,7 +92,19 @@ impl fmt::Display for Bencoded {
                 write!(f, "]")
             }
 
-            _ => Ok(()),
+            Self::Dict(pairs) => {
+                write!(f, "{{")?;
+
+                for (k, v) in &pairs[..pairs.len() - 1] {
+                    write!(f, "{}: {}, ", k, v)?;
+                }
+
+                if let Some((k, v)) = pairs.last() {
+                    write!(f, "{}: {}", k, v)?;
+                }
+
+                write!(f, "}}")
+            }
         }
     }
 }
