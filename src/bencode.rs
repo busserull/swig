@@ -7,7 +7,7 @@ pub enum Bencoded {
     Bstr(String),
     Int(i64),
     List(Vec<Bencoded>),
-    Dict(HashMap<Bencoded, Bencoded>),
+    Dict(Vec<(Bencoded, Bencoded)>),
 }
 
 impl Bencoded {
@@ -27,21 +27,29 @@ impl Bencoded {
             }
 
             Some('l') => {
-                let mut list = Vec::new();
-
-                let mut encoded = &encoded[1..];
-
-                while encoded.len() > 0 && encoded.chars().next().unwrap() != 'e' {
-                    let (item, rest) = Bencoded::do_parse(encoded)?;
-                    list.push(item);
-                    encoded = rest;
-                }
-
-                matches!(encoded.chars().next(), Some('e'))
-                    .then(|| (Self::List(list), &encoded[..]))
+                parse_bencoded_list(&encoded[1..]).map(|(list, rest)| (Self::List(list), rest))
             }
 
-            Some('d') => None,
+            Some('d') => {
+                let (list, rest) = parse_bencoded_list(&encoded[1..])?;
+
+                if list.len() % 2 != 0 {
+                    return None;
+                }
+
+                let mut key_values = Vec::with_capacity(list.len() / 2);
+
+                let mut list = list.into_iter();
+
+                while list.len() != 0 {
+                    let k = list.next().unwrap();
+                    let v = list.next().unwrap();
+
+                    key_values.push((k, v));
+                }
+
+                Some((Self::Dict(key_values), rest))
+            }
 
             Some('0'..='9') => {
                 let split_index = encoded.find(':')?;
@@ -63,4 +71,16 @@ impl Bencoded {
             _ => None,
         }
     }
+}
+
+fn parse_bencoded_list(mut encoded: &str) -> Option<(Vec<Bencoded>, &str)> {
+    let mut list = Vec::new();
+
+    while encoded.len() > 0 && encoded.chars().next().unwrap() != 'e' {
+        let (item, rest) = Bencoded::do_parse(encoded)?;
+        list.push(item);
+        encoded = rest;
+    }
+
+    matches!(encoded.chars().next(), Some('e')).then_some((list, encoded))
 }
