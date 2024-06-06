@@ -76,6 +76,21 @@ impl fmt::Display for Bencoded {
         match self {
             Self::Bstr(str) => write!(f, "\"{}\"", str),
             Self::Int(int) => write!(f, "{}", int),
+
+            Self::List(list) => {
+                write!(f, "[")?;
+
+                for item in &list[..list.len() - 1] {
+                    write!(f, "{}, ", item)?;
+                }
+
+                if let Some(item) = list.last() {
+                    write!(f, "{}", item)?;
+                }
+
+                write!(f, "]")
+            }
+
             _ => Ok(()),
         }
     }
