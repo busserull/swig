@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-use std::iter::Peekable;
-use std::str::Chars;
-
 #[derive(Debug)]
 pub enum Bencoded {
     Bstr(String),
