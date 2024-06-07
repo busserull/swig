@@ -76,7 +76,11 @@ impl Bencoded {
 impl fmt::Display for Bencoded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Bstr(bstr) => write!(f, "\"{}\"", String::from_utf8_lossy(bstr)),
+            Self::Bstr(bstr) => write!(
+                f,
+                "\"{}\"",
+                String::from_utf8(bstr.clone()).unwrap_or_else(|_| String::from("[BYTE STRING]"))
+            ),
 
             Self::Int(int) => write!(f, "{}", int),
 

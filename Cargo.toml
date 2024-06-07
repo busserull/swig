@@ -5,3 +5,4 @@ authors = ["Kolbjørn Austreng <aschenhaug@gmail.com>"]
 edition = "2021"
 
 [dependencies]
+hex = "0.4.3"
