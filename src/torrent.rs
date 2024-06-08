@@ -7,6 +7,11 @@ use bencode::Bencoded;
 mod sha;
 use sha::Sha1;
 
+mod url;
+use url::Url;
+
+// use reqwest::Url;
+
 #[derive(Debug)]
 pub struct Torrent {
     // Announce URL of tracker
@@ -71,6 +76,23 @@ impl Torrent {
             private,
             payload,
         }
+    }
+
+    pub fn url(&self) -> String {
+        let bytes_left = match &self.payload {
+            Payload::Single { name, length } => *length,
+            Payload::Multi { name, files } => 0,
+        };
+
+        Url::new(&self.announce)
+            .with_param("info_hash", self.info_hash)
+            .with_param("peer_id", "12345678901234567892")
+            .with_param("port", 6881)
+            .with_param("uploaded", 0)
+            .with_param("downloaded", 0)
+            .with_param("left", bytes_left)
+            .with_param("compact", 1)
+            .into()
     }
 }
 

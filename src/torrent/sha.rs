@@ -20,6 +20,20 @@ impl Sha1 {
 
         Self::new_raw(&hasher.finalize())
     }
+
+    pub fn url_safe(&self) -> String {
+        let mut url = String::with_capacity(30);
+
+        for (i, nibble) in hex::encode(&self.0).chars().enumerate() {
+            if i % 2 == 0 {
+                url.push_str("%");
+            }
+
+            url.push(nibble.to_ascii_uppercase());
+        }
+
+        url
+    }
 }
 
 impl AsRef<[u8]> for Sha1 {
