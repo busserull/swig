@@ -15,7 +15,7 @@ pub struct Torrent {
     // Announce URL of tracker
     announce: String,
 
-    info_hash: Sha1,
+    pub info_hash: Sha1,
 
     // Number of bytes in each piece
     piece_length: usize,
