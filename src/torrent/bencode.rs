@@ -115,6 +115,53 @@ impl fmt::Display for Bencoded {
     }
 }
 
+impl From<&Bencoded> for Vec<u8> {
+    fn from(value: &Bencoded) -> Self {
+        match value {
+            Bencoded::Bstr(bstr) => bstr
+                .len()
+                .to_string()
+                .as_bytes()
+                .iter()
+                .chain(":".as_bytes().iter())
+                .chain(bstr.iter())
+                .cloned()
+                .collect(),
+
+            Bencoded::Int(int) => format!("i{}e", int).as_bytes().iter().cloned().collect(),
+
+            Bencoded::List(list) => {
+                let mut vec = vec![b'l'];
+
+                for item in list.into_iter() {
+                    let inner: Vec<u8> = item.into();
+                    vec.extend_from_slice(&inner);
+                }
+
+                vec.push(b'e');
+                vec
+            }
+
+            Bencoded::Dict(pairs) => {
+                let mut vec = vec![b'd'];
+
+                let mut sorted = pairs.clone();
+                sorted.sort_by(|(a, _), (b, _)| compare_bencoded(a, b));
+
+                for (key, value) in sorted.iter() {
+                    let k: Vec<u8> = key.into();
+                    let v: Vec<u8> = value.into();
+                    vec.extend_from_slice(&k);
+                    vec.extend_from_slice(&v);
+                }
+
+                vec.push(b'e');
+                vec
+            }
+        }
+    }
+}
+
 fn parse_bencoded_list(mut encoded: &[u8]) -> Option<(Vec<Bencoded>, &[u8])> {
     let mut list = Vec::new();
 
@@ -125,4 +172,34 @@ fn parse_bencoded_list(mut encoded: &[u8]) -> Option<(Vec<Bencoded>, &[u8])> {
     }
 
     matches!(encoded.iter().next().as_deref(), Some(b'e')).then_some((list, &encoded[1..]))
+}
+
+fn compare_bencoded(lhs: &Bencoded, rhs: &Bencoded) -> std::cmp::Ordering {
+    let lhs = if let Bencoded::Bstr(string) = lhs {
+        string
+    } else {
+        panic!("Ordering not defined for bencoded items that are not byte strings");
+    };
+
+    let rhs = if let Bencoded::Bstr(string) = rhs {
+        string
+    } else {
+        panic!("Ordering not defined for bencoded items that are not byte strings");
+    };
+
+    for (l, r) in lhs.iter().zip(rhs.iter()) {
+        if l < r {
+            return std::cmp::Ordering::Less;
+        } else if l > r {
+            return std::cmp::Ordering::Greater;
+        }
+    }
+
+    if lhs.len() == rhs.len() {
+        std::cmp::Ordering::Equal
+    } else if lhs.len() < rhs.len() {
+        std::cmp::Ordering::Less
+    } else {
+        std::cmp::Ordering::Greater
+    }
 }

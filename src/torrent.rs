@@ -1,15 +1,18 @@
-use std::fmt;
 use std::fs;
 use std::path::Path;
 
 mod bencode;
-
 use bencode::Bencoded;
+
+mod sha;
+use sha::Sha1;
 
 #[derive(Debug)]
 pub struct Torrent {
     // Announce URL of tracker
     announce: String,
+
+    info_hash: Sha1,
 
     // Number of bytes in each piece
     piece_length: usize,
@@ -32,6 +35,9 @@ impl Torrent {
 
         let info = get_dict(&bencoded, "info").expect("No torrent `info` entry");
 
+        let info_reencoded = Vec::from(&info);
+        let info_hash = Sha1::digest(&info_reencoded);
+
         let name = get_bstr(&info, "name")
             .map(|name| String::from_utf8(name).expect("Torrent `info.name` not valid UTF-8"))
             .expect("No torrent `info.name` entry");
@@ -47,7 +53,7 @@ impl Torrent {
                     0,
                     "Torrent `pieces` does not contain a valid multiple of SHA1 digests"
                 );
-                sha_string.chunks_exact(20).map(Sha1::new).collect()
+                sha_string.chunks_exact(20).map(Sha1::new_raw).collect()
             })
             .expect("No torrent `pieces` entry");
 
@@ -59,29 +65,12 @@ impl Torrent {
 
         Self {
             announce,
+            info_hash,
             piece_length,
             pieces,
             private,
             payload,
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Sha1([u8; 20]);
-
-impl Sha1 {
-    fn new(sha: &[u8]) -> Self {
-        let mut buffer = [0; 20];
-        buffer[..].copy_from_slice(&sha[0..20]);
-
-        Self(buffer)
-    }
-}
-
-impl fmt::Debug for Sha1 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Sha1({})", hex::encode(self.0))
     }
 }
 
