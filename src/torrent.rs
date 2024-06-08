@@ -10,8 +10,6 @@ use sha::Sha1;
 mod url;
 use url::Url;
 
-// use reqwest::Url;
-
 #[derive(Debug)]
 pub struct Torrent {
     // Announce URL of tracker
@@ -78,13 +76,13 @@ impl Torrent {
         }
     }
 
-    pub fn url(&self) -> String {
+    pub fn get(&self) -> TrackerResponse {
         let bytes_left = match &self.payload {
             Payload::Single { name, length } => *length,
             Payload::Multi { name, files } => 0,
         };
 
-        Url::new(&self.announce)
+        let url: String = Url::new(&self.announce)
             .with_param("info_hash", self.info_hash)
             .with_param("peer_id", "12345678901234567892")
             .with_param("port", 6881)
@@ -92,7 +90,70 @@ impl Torrent {
             .with_param("downloaded", 0)
             .with_param("left", bytes_left)
             .with_param("compact", 1)
-            .into()
+            .into();
+
+        let response = reqwest::blocking::get(url)
+            .expect("Cannot contact tracker")
+            .bytes()
+            .expect("Cannot read bytes of tracker response");
+
+        let bencoded = Bencoded::parse(&response).expect("Cannot parse bencoded tracker response");
+
+        TrackerResponse::new(bencoded)
+    }
+}
+
+#[derive(Debug)]
+pub struct TrackerResponse {
+    interval: usize,
+    peers: Vec<Peer>,
+}
+
+impl TrackerResponse {
+    fn new(response: Bencoded) -> Self {
+        let interval =
+            get_int(&response, "interval").expect("No `interval` in tracker response") as usize;
+
+        let peers = get_bstr(&response, "peers")
+            .expect("No `peers` in tracker response")
+            .chunks_exact(6)
+            .map(Peer::new)
+            .collect();
+
+        Self { interval, peers }
+    }
+}
+
+pub struct Peer {
+    ip: (u8, u8, u8, u8),
+    port: u16,
+}
+
+impl Peer {
+    fn new(peer_sextet: &[u8]) -> Self {
+        let mut port_bytes = [0u8; 2];
+        port_bytes.copy_from_slice(&peer_sextet[4..=5]);
+
+        let ip = (
+            peer_sextet[0],
+            peer_sextet[1],
+            peer_sextet[2],
+            peer_sextet[3],
+        );
+
+        let port = u16::from_be_bytes(port_bytes);
+
+        Self { ip, port }
+    }
+}
+
+impl std::fmt::Debug for Peer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}.{}:{}",
+            self.ip.0, self.ip.1, self.ip.2, self.ip.3, self.port
+        )
     }
 }
 
