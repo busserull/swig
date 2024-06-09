@@ -22,13 +22,7 @@ fn main() {
 
     let peer = peers.first_mut().expect("No peers in peer list");
 
-    for i in 0..30 {
-        if i % 2 == 0 {
-            peer.send(PeerMessage::Interested);
-        } else {
-            peer.send(PeerMessage::NotInterested);
-        }
+    let result = peer.download(&torrent, 0);
 
-        println!("{:?}", peer.recv());
-    }
+    println!("{:?}", result);
 }

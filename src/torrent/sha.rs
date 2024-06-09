@@ -47,3 +47,15 @@ impl fmt::Debug for Sha1 {
         write!(f, "Sha1({})", hex::encode(self.0))
     }
 }
+
+impl PartialEq for Sha1 {
+    fn eq(&self, other: &Self) -> bool {
+        for (a, b) in self.0.iter().zip(other.0.iter()) {
+            if a != b {
+                return false;
+            }
+        }
+
+        true
+    }
+}
