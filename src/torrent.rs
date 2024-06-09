@@ -1,21 +1,27 @@
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::Path;
 
 mod bencode;
 use bencode::Bencoded;
 
 mod sha;
+use reqwest::header::EXPIRES;
 use sha::Sha1;
 
 mod url;
 use url::Url;
+
+pub mod peer_id;
+pub use peer_id::PeerId;
 
 #[derive(Debug)]
 pub struct Torrent {
     // Announce URL of tracker
     announce: String,
 
-    pub info_hash: Sha1,
+    info_hash: Sha1,
 
     // Number of bytes in each piece
     piece_length: usize,
@@ -76,7 +82,7 @@ impl Torrent {
         }
     }
 
-    pub fn get(&self) -> TrackerResponse {
+    pub fn get_peer_list(&self, our_id: PeerId) -> PeerList {
         let bytes_left = match &self.payload {
             Payload::Single { name, length } => *length,
             Payload::Multi { name, files } => 0,
@@ -84,7 +90,7 @@ impl Torrent {
 
         let url: String = Url::new(&self.announce)
             .with_param("info_hash", self.info_hash)
-            .with_param("peer_id", "12345678901234567892")
+            .with_param("peer_id", our_id.as_ref())
             .with_param("port", 6881)
             .with_param("uploaded", 0)
             .with_param("downloaded", 0)
@@ -99,37 +105,52 @@ impl Torrent {
 
         let bencoded = Bencoded::parse(&response).expect("Cannot parse bencoded tracker response");
 
-        TrackerResponse::new(bencoded)
+        PeerList::new(bencoded, our_id, self.info_hash)
     }
 }
 
 #[derive(Debug)]
-pub struct TrackerResponse {
+pub struct PeerList {
+    our_id: PeerId,
+    expected_info_hash: Sha1,
     interval: usize,
-    peers: Vec<Peer>,
+    peers: Vec<PeerAddress>,
 }
 
-impl TrackerResponse {
-    fn new(response: Bencoded) -> Self {
+impl PeerList {
+    fn new(response: Bencoded, our_id: PeerId, expected_info_hash: Sha1) -> Self {
         let interval =
             get_int(&response, "interval").expect("No `interval` in tracker response") as usize;
 
         let peers = get_bstr(&response, "peers")
             .expect("No `peers` in tracker response")
             .chunks_exact(6)
-            .map(Peer::new)
+            .map(PeerAddress::new)
             .collect();
 
-        Self { interval, peers }
+        Self {
+            our_id,
+            expected_info_hash,
+            interval,
+            peers,
+        }
+    }
+
+    pub fn connect(&self, max_connections: usize) -> Vec<PeerConnection> {
+        self.peers
+            .iter()
+            .take(max_connections)
+            .filter_map(|peer| peer.connect(self.our_id, self.expected_info_hash))
+            .collect()
     }
 }
 
-pub struct Peer {
+struct PeerAddress {
     ip: (u8, u8, u8, u8),
     port: u16,
 }
 
-impl Peer {
+impl PeerAddress {
     fn new(peer_sextet: &[u8]) -> Self {
         let mut port_bytes = [0u8; 2];
         port_bytes.copy_from_slice(&peer_sextet[4..=5]);
@@ -145,9 +166,38 @@ impl Peer {
 
         Self { ip, port }
     }
+
+    fn connect(&self, our_id: PeerId, expected_info_hash: Sha1) -> Option<PeerConnection> {
+        let handshake: Vec<u8> = [19]
+            .into_iter()
+            .chain("BitTorrent protocol".as_bytes().into_iter().cloned())
+            .chain([0, 0, 0, 0, 0, 0, 0, 0].into_iter())
+            .chain(expected_info_hash.as_ref().iter().cloned())
+            .chain(our_id.as_ref().into_iter().cloned())
+            .collect();
+
+        let mut buffer = [0u8; 1024];
+        let mut stream = TcpStream::connect(self.to_string()).ok()?;
+
+        stream.write(&handshake).ok()?;
+
+        let response_size = stream.read(&mut buffer).ok()?;
+
+        if response_size < 68 {
+            return None;
+        }
+
+        let got_info_hash = Vec::from(&buffer[28..48]);
+
+        if got_info_hash == expected_info_hash.as_ref() {
+            Some(PeerConnection { stream, buffer })
+        } else {
+            None
+        }
+    }
 }
 
-impl std::fmt::Debug for Peer {
+impl std::fmt::Display for PeerAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -155,6 +205,18 @@ impl std::fmt::Debug for Peer {
             self.ip.0, self.ip.1, self.ip.2, self.ip.3, self.port
         )
     }
+}
+
+impl std::fmt::Debug for PeerAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PeerAddress({})", self)
+    }
+}
+
+#[derive(Debug)]
+pub struct PeerConnection {
+    stream: TcpStream,
+    buffer: [u8; 1024],
 }
 
 #[derive(Debug)]
