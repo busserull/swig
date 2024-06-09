@@ -176,7 +176,7 @@ impl PeerAddress {
             .chain(our_id.as_ref().into_iter().cloned())
             .collect();
 
-        let mut buffer = [0u8; 1024];
+        let mut buffer = [0u8; 64 * 1024];
         let mut stream = TcpStream::connect(self.to_string()).ok()?;
 
         stream.write(&handshake).ok()?;
@@ -190,6 +190,10 @@ impl PeerAddress {
         let got_info_hash = Vec::from(&buffer[28..48]);
 
         if got_info_hash == expected_info_hash.as_ref() {
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_millis(200)))
+                .ok();
+
             Some(PeerConnection { stream, buffer })
         } else {
             None
@@ -216,7 +220,208 @@ impl std::fmt::Debug for PeerAddress {
 #[derive(Debug)]
 pub struct PeerConnection {
     stream: TcpStream,
-    buffer: [u8; 1024],
+    buffer: [u8; 64 * 1024],
+}
+
+impl PeerConnection {
+    pub fn recv(&mut self) -> Option<PeerMessage> {
+        let size = self.stream.read(&mut self.buffer).ok()?;
+        println!("LOG: [recv] got {:?}", &self.buffer[..size]);
+        PeerMessage::parse(&self.buffer[..size])
+    }
+
+    pub fn send(&mut self, message: PeerMessage) {
+        let bytes = Vec::from(message);
+        println!("LOG: [send] sending {:?}", bytes);
+        self.stream.write(&bytes).ok();
+    }
+}
+
+#[derive(Debug)]
+pub enum PeerMessage {
+    KeepAlive,
+    Choke,
+    Unchoke,
+    Interested,
+    NotInterested,
+    Have(u32),
+    Bitfield(Vec<u8>),
+    Request {
+        index: usize,
+        begin: usize,
+        length: usize,
+    },
+    Piece {
+        index: usize,
+        begin: usize,
+        piece: usize,
+    },
+    Cancel {
+        index: usize,
+        begin: usize,
+        length: usize,
+    },
+}
+
+impl From<PeerMessage> for Vec<u8> {
+    fn from(msg: PeerMessage) -> Self {
+        let capacity = if let PeerMessage::Bitfield(field) = &msg {
+            5 + field.len()
+        } else {
+            17
+        };
+
+        let mut bytes = Vec::with_capacity(capacity);
+        bytes.extend_from_slice(&[0, 0, 0, 0]);
+
+        match msg {
+            PeerMessage::KeepAlive => (),
+
+            PeerMessage::Choke => {
+                bytes[3] = 1;
+                bytes.push(0);
+            }
+
+            PeerMessage::Unchoke => {
+                bytes[3] = 1;
+                bytes.push(1);
+            }
+
+            PeerMessage::Interested => {
+                bytes[3] = 1;
+                bytes.push(2);
+            }
+
+            PeerMessage::NotInterested => {
+                bytes[3] = 1;
+                bytes.push(3);
+            }
+
+            PeerMessage::Have(index) => {
+                bytes[3] = 5;
+                bytes.push(4);
+                bytes.extend_from_slice(&index.to_be_bytes());
+            }
+
+            PeerMessage::Bitfield(mut field) => {
+                bytes.clear();
+                bytes.extend_from_slice(&(field.len() as u32).to_be_bytes());
+                bytes.push(5);
+                bytes.append(&mut field);
+            }
+
+            PeerMessage::Request {
+                index,
+                begin,
+                length,
+            } => {
+                bytes[3] = 13;
+                bytes.push(6);
+                bytes.extend_from_slice(&(index as u32).to_be_bytes());
+                bytes.extend_from_slice(&(begin as u32).to_be_bytes());
+                bytes.extend_from_slice(&(length as u32).to_be_bytes());
+            }
+
+            PeerMessage::Piece {
+                index,
+                begin,
+                piece,
+            } => {
+                bytes[3] = 13;
+                bytes.push(7);
+                bytes.extend_from_slice(&(index as u32).to_be_bytes());
+                bytes.extend_from_slice(&(begin as u32).to_be_bytes());
+                bytes.extend_from_slice(&(piece as u32).to_be_bytes());
+            }
+
+            PeerMessage::Cancel {
+                index,
+                begin,
+                length,
+            } => {
+                bytes[3] = 13;
+                bytes.push(8);
+                bytes.extend_from_slice(&(index as u32).to_be_bytes());
+                bytes.extend_from_slice(&(begin as u32).to_be_bytes());
+                bytes.extend_from_slice(&(length as u32).to_be_bytes());
+            }
+        }
+
+        bytes
+    }
+}
+
+impl PeerMessage {
+    fn parse(buffer: &[u8]) -> Option<Self> {
+        let mut u32buffer = [0u8; 4];
+        u32buffer.copy_from_slice(&buffer[0..4]);
+
+        let length = u32::from_be_bytes(u32buffer);
+
+        if length == 0 {
+            return Some(Self::KeepAlive);
+        }
+
+        match buffer[4] {
+            0 => Some(Self::Choke),
+            1 => Some(Self::Unchoke),
+            2 => Some(Self::Interested),
+            3 => Some(Self::NotInterested),
+
+            4 => {
+                u32buffer.copy_from_slice(&buffer[5..9]);
+                Some(Self::Have(u32::from_be_bytes(u32buffer)))
+            }
+
+            5 => Some(Self::Bitfield(Vec::from(
+                &buffer[5..5 + length as usize - 1],
+            ))),
+
+            6 => {
+                let (index, begin, length) = extract_u32_triplet(&buffer[5..]);
+                Some(Self::Request {
+                    index: index as usize,
+                    begin: begin as usize,
+                    length: length as usize,
+                })
+            }
+
+            7 => {
+                let (index, begin, piece) = extract_u32_triplet(&buffer[5..]);
+                Some(Self::Piece {
+                    index: index as usize,
+                    begin: begin as usize,
+                    piece: piece as usize,
+                })
+            }
+
+            8 => {
+                let (index, begin, length) = extract_u32_triplet(&buffer[5..]);
+                Some(Self::Cancel {
+                    index: index as usize,
+                    begin: begin as usize,
+                    length: length as usize,
+                })
+            }
+
+            _ => None,
+        }
+    }
+}
+
+fn extract_u32_triplet(buffer: &[u8]) -> (u32, u32, u32) {
+    let mut bytes = [0u8; 4];
+
+    bytes.copy_from_slice(&buffer[0..4]);
+    let a = u32::from_be_bytes(bytes);
+
+    bytes.copy_from_slice(&buffer[4..8]);
+    let b = u32::from_be_bytes(bytes);
+
+    bytes.copy_from_slice(&buffer[8..12]);
+    let c = u32::from_be_bytes(bytes);
+
+    (a, b, c)
 }
 
 #[derive(Debug)]

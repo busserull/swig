@@ -1,26 +1,7 @@
 use std::{io::Read, io::Write, net::TcpStream};
 mod torrent;
 
-use torrent::{PeerConnection, PeerId, Torrent};
-
-enum MessageType {
-    Choke = 0,
-    Unchoke = 1,
-    Interested = 2,
-    NotInterested = 3,
-    Have = 4,
-    Bitfield = 5,
-    Request = 6,
-    Piece = 7,
-    Cancel = 8,
-}
-
-struct ConnectedPeer {
-    choked: bool,
-    interested: bool,
-    stream: TcpStream,
-    buffer: Vec<u8>,
-}
+use torrent::{PeerId, PeerMessage, Torrent};
 
 /*
 impl ConnectedPeer {
@@ -37,9 +18,17 @@ fn main() {
 
     let peer_list = torrent.get_peer_list(id);
 
-    let peers = peer_list.connect(1);
+    let mut peers = peer_list.connect(1);
 
-    for peer in peers {
-        println!("{:?}", peer);
+    let peer = peers.first_mut().expect("No peers in peer list");
+
+    for i in 0..30 {
+        if i % 2 == 0 {
+            peer.send(PeerMessage::Interested);
+        } else {
+            peer.send(PeerMessage::NotInterested);
+        }
+
+        println!("{:?}", peer.recv());
     }
 }
