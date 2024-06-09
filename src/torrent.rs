@@ -7,7 +7,6 @@ mod bencode;
 use bencode::Bencoded;
 
 mod sha;
-use reqwest::header::EXPIRES;
 use sha::Sha1;
 
 mod url;
@@ -106,6 +105,22 @@ impl Torrent {
         let bencoded = Bencoded::parse(&response).expect("Cannot parse bencoded tracker response");
 
         PeerList::new(bencoded, our_id, self.info_hash)
+    }
+
+    pub fn create_single_payload(&self) -> fs::File {
+        match &self.payload {
+            Payload::Single { name, length: _ } => {
+                fs::File::create_new(name).expect("Cannot create single payload file")
+            }
+
+            Payload::Multi { name: _, files: _ } => {
+                todo!("Multi payload not implemented");
+            }
+        }
+    }
+
+    pub fn piece_count(&self) -> usize {
+        self.pieces.len()
     }
 }
 
@@ -251,40 +266,6 @@ pub enum DownloadError {
     IncorrectIndexReturned,
 }
 
-struct BlockIter {
-    begin: usize,
-    block_size: usize,
-    left: usize,
-}
-
-impl BlockIter {
-    fn new(piece_length: usize, block_kib: usize) -> Self {
-        Self {
-            begin: 0,
-            block_size: block_kib * 1024,
-            left: piece_length,
-        }
-    }
-}
-
-impl Iterator for BlockIter {
-    type Item = (usize, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.left == 0 {
-            return None;
-        }
-
-        let begin = self.begin;
-        let size = std::cmp::min(self.block_size, self.left);
-
-        self.begin += size;
-        self.left -= size;
-
-        Some((begin, size))
-    }
-}
-
 #[derive(Debug)]
 pub struct PeerConnection {
     stream: TcpStream,
@@ -315,12 +296,18 @@ impl PeerConnection {
         }
 
         let expected_sha = torrent.pieces[piece];
-        let mut buffer = vec![0; torrent.piece_length];
 
         self.send(PeerMessage::Interested);
 
+        let payload_left = match torrent.payload {
+            Payload::Single { name: _, length } => length - torrent.piece_length * piece,
+            Payload::Multi { name: _, files: _ } => todo!("Multi file torrents not supported"),
+        };
+
+        let mut left = std::cmp::min(torrent.piece_length as u32, payload_left as u32);
         let mut begin = 0;
-        let mut left = torrent.piece_length as u32;
+
+        let mut buffer = vec![0; left as usize];
 
         'outer: while left != 0 {
             self.send(PeerMessage::Request {
@@ -508,14 +495,14 @@ impl From<PeerMessage> for Vec<u8> {
 
 impl PeerMessage {
     fn parse(buffer: &[u8]) -> Option<Self> {
+        if buffer.len() < 5 {
+            return Some(Self::KeepAlive);
+        }
+
         let mut u32buffer = [0u8; 4];
         u32buffer.copy_from_slice(&buffer[0..4]);
 
         let length = u32::from_be_bytes(u32buffer);
-
-        if length == 0 {
-            return Some(Self::KeepAlive);
-        }
 
         match buffer[4] {
             0 => Some(Self::Choke),
