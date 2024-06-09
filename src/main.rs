@@ -1,15 +1,6 @@
-use std::{io::Read, io::Write, net::TcpStream};
 mod torrent;
 
-use torrent::{PeerId, PeerMessage, Torrent};
-
-/*
-impl ConnectedPeer {
-    fn new(address: &str, our_id: &str, info_hash: &[u8]) -> Self {
-        let mut stream = TcpStream::connect(address).
-    }
-}
-*/
+use torrent::{PeerId, Torrent};
 
 fn main() {
     let id = PeerId::new();
@@ -24,5 +15,8 @@ fn main() {
 
     let result = peer.download(&torrent, 0);
 
-    println!("{:?}", result);
+    match result {
+        Ok(bytes) => println!("{}", String::from_utf8_lossy(&bytes)),
+        Err(e) => println!("Error: {:?}", e),
+    }
 }

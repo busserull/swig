@@ -248,6 +248,7 @@ pub enum DownloadError {
     PeerDoesNotHavePiece,
     ShaMismatch,
     PeerDisconnect,
+    IncorrectIndexReturned,
 }
 
 struct BlockIter {
@@ -318,22 +319,36 @@ impl PeerConnection {
 
         self.send(PeerMessage::Interested);
 
-        for (block_begin, block_length) in BlockIter::new(torrent.piece_length, 14) {
+        let mut begin = 0;
+        let mut left = torrent.piece_length as u32;
+
+        'outer: while left != 0 {
             self.send(PeerMessage::Request {
                 index: piece as u32,
-                begin: block_begin as u32,
-                length: block_length as u32,
+                begin,
+                length: std::cmp::min(14 * 1024, left),
             });
 
             while let Ok(message) = self.recv() {
                 match message {
                     PeerMessage::Piece {
-                        index: _,
-                        begin,
-                        piece,
+                        index: got_index,
+                        begin: got_begin,
+                        piece: got_piece,
                     } => {
-                        let range = begin as usize..begin as usize + piece.len();
-                        (&mut buffer[range]).copy_from_slice(&piece);
+                        if got_index != piece as u32 {
+                            return Err(DownloadError::IncorrectIndexReturned);
+                        }
+
+                        if got_begin != begin {
+                            continue 'outer;
+                        }
+
+                        let range = begin as usize..begin as usize + got_piece.len();
+                        (&mut buffer[range]).copy_from_slice(&got_piece);
+
+                        begin += got_piece.len() as u32;
+                        left -= got_piece.len() as u32;
                     }
 
                     _ => (),
@@ -357,7 +372,6 @@ impl PeerConnection {
             .read(&mut self.buffer)
             .map_err(|_| DownloadError::PeerDisconnect)?;
 
-        println!("LOG [recv]: {:?}", &self.buffer[..std::cmp::min(20, size)]);
         let message = PeerMessage::parse(&self.buffer[..size]).unwrap_or(PeerMessage::KeepAlive);
 
         match &message {
@@ -498,7 +512,6 @@ impl PeerMessage {
         u32buffer.copy_from_slice(&buffer[0..4]);
 
         let length = u32::from_be_bytes(u32buffer);
-        println!("LOG [parse] length: {}", length);
 
         if length == 0 {
             return Some(Self::KeepAlive);
